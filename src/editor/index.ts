@@ -1001,7 +1001,7 @@ export interface ProofEditor {
   isReviewLocked(): boolean;
 }
 
-class ProofEditorImpl implements ProofEditor {
+export class ProofEditorImpl implements ProofEditor {
   editor: Editor | null = null;
   heatMapMode: 'hidden' | 'subtle' | 'background' | 'full' = 'background';
   private isCliMode: boolean = false;
@@ -1155,8 +1155,8 @@ class ProofEditorImpl implements ProofEditor {
     this.isShareMode = shareClient.isShareMode();
   }
 
-  async init(): Promise<void> {
-    const root = document.getElementById('editor');
+  async init(rootElement?: HTMLElement): Promise<void> {
+    const root = rootElement ?? document.getElementById('editor');
     if (!root) {
       console.error('Editor root element not found');
       return;
@@ -10351,15 +10351,8 @@ if (window.location?.pathname?.startsWith('/d/')) {
 (window as any).navigatePrevComment = () => window.proof.navigateToPrevComment();
 (window as any).resolveActiveComment = () => window.proof.resolveActiveComment();
 
-// Auto-initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    console.log('[INIT] DOMContentLoaded - calling init()');
-    window.proof.init();
-  });
-} else {
-  console.log('[INIT] DOM ready - calling init() immediately');
-  window.proof.init();
-}
+// Auto-initialize disabled for embedding in custom apps (zurich).
+// Consumers should: import { ProofEditorImpl } and call new ProofEditorImpl().init(rootElement)
+// (window.proof singleton above is kept inactive for debug-helper compatibility)
 
 export default window.proof;
