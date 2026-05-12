@@ -7,9 +7,15 @@ import { apiRoutes } from './routes.js';
 import { agentRoutes } from './agent-routes.js';
 import { setupWebSocket } from './ws.js';
 import { createBridgeMountRouter } from './bridge.js';
-import { getCollabRuntime, startCollabRuntimeEmbedded } from './collab.js';
+import {
+  flushAllDocumentsForShutdown,
+  getCollabRuntime,
+  startCollabRuntimeEmbedded,
+  stopCollabRuntime,
+} from './collab.js';
 import { discoveryRoutes } from './discovery-routes.js';
 import { shareWebRoutes } from './share-web-routes.js';
+import { setShuttingDown } from './shutdown-state.js';
 import {
   capabilitiesPayload,
   enforceApiClientCompatibility,
@@ -131,9 +137,66 @@ async function main(): Promise<void> {
   setupWebSocket(wss);
   await startCollabRuntimeEmbedded(PORT);
 
+  registerGracefulShutdown();
+
   server.listen(PORT, () => {
     console.log(`[proof-sdk] listening on http://127.0.0.1:${PORT}`);
   });
+}
+
+// Wire SIGINT (Ctrl+C) and SIGTERM (process supervisors / Tauri's
+// kill on app quit) to proof-sdk's graceful-flush path. Without this
+// the collab runtime's debounced persistDoc timers (250ms by default)
+// drop their in-memory deltas the moment the process is killed —
+// users lose the last keystrokes before shutdown, and on dev restarts
+// that loss is much larger because so many edits land inside any
+// given debounce window. flushAllDocumentsForShutdown + stopCollab
+// Runtime are the existing helpers in collab.ts; this function is the
+// missing wiring step that previously left them dormant. Idempotent:
+// repeat signals during shutdown are absorbed instead of restarting
+// the dance, and a hard timeout prevents a hung flush from leaving
+// a zombie process the user has to SIGKILL.
+function registerGracefulShutdown(): void {
+  let inProgress = false;
+  const HARD_TIMEOUT_MS = 5000;
+
+  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
+    if (inProgress) return;
+    inProgress = true;
+    console.log(`[proof-sdk] ${signal} received, flushing pending writes`);
+    setShuttingDown();
+
+    const hardExit = setTimeout(() => {
+      console.error('[proof-sdk] graceful shutdown timed out, forcing exit');
+      process.exit(1);
+    }, HARD_TIMEOUT_MS);
+    hardExit.unref();
+
+    try {
+      // flushAllDocumentsForShutdown internally waits for collab
+      // WebSocket connections to drain (waitForCollabConnectionDrain)
+      // before persisting. Calling server.close() here in parallel
+      // double-waits on the same WS sockets — the first version of
+      // this handler did and reliably blew past the 5s hard timeout
+      // because both paths sat waiting for each other. Let the flush
+      // helper own connection-drain, then stop the runtime. The OS
+      // will close listening sockets when the process exits.
+      await flushAllDocumentsForShutdown();
+      await stopCollabRuntime({ skipDocFlush: true });
+    } catch (error) {
+      console.error('[proof-sdk] error during graceful shutdown', error);
+      clearTimeout(hardExit);
+      process.exit(1);
+      return;
+    }
+
+    console.log('[proof-sdk] graceful shutdown complete');
+    clearTimeout(hardExit);
+    process.exit(0);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main().catch((error) => {
