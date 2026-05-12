@@ -1339,10 +1339,6 @@ apiRoutes.put('/documents/:slug', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'title must be a string when provided' });
     return;
   }
-  if (hasTitleUpdate && normalizedTitle.length === 0) {
-    res.status(400).json({ error: 'title must not be empty', code: 'EMPTY_TITLE' });
-    return;
-  }
 
   if (doc.share_state === 'PAUSED' && !ownerOrBot) {
     res.status(403).json({ error: 'Document is paused' });
@@ -1457,7 +1453,8 @@ apiRoutes.put('/documents/:slug', async (req: Request, res: Response) => {
   }
   if (hasTitleUpdate) {
     didUpdate = true;
-    writeSucceeded = writeSucceeded && updateDocumentTitle(slug, normalizedTitle);
+    const canonicalTitle = normalizedTitle.length > 0 ? normalizedTitle : null;
+    writeSucceeded = writeSucceeded && updateDocumentTitle(slug, canonicalTitle);
   }
   if (!didUpdate) {
     res.status(400).json({ error: 'Provide title, marks, and/or markdown' });

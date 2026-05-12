@@ -1127,14 +1127,13 @@ async function runRoutePayloadValidationTests(): Promise<void> {
       assert(payload.error === 'title must be a string when provided', 'Expected title validation message');
     });
 
-    await test('D2: PUT /documents/:slug rejects empty title payload', async () => {
+    await test('D2: PUT /documents/:slug accepts empty title payload', async () => {
       const response = await put(baseUrl, `/api/documents/${slug}`, {
         title: '   ',
       });
-      assert(response.status === 400, `Expected status 400, got ${response.status}`);
+      assert(response.status === 200, `Expected status 200, got ${response.status}`);
       const payload = await response.json();
-      assertEqual(payload.code, 'EMPTY_TITLE');
-      assert(payload.error === 'title must not be empty', 'Expected empty title validation message');
+      assert(payload.success === true, 'Expected success: true for empty title');
     });
 
     await test('D2: PUT /documents/:slug enforces title update edit authorization', async () => {
