@@ -810,14 +810,6 @@ apiRoutes.post('/documents', (req: Request, res: Response) => {
     return;
   }
   const sanitizedMarkdown = stripEphemeralCollabSpans(markdown);
-  if (isBlankMarkdown(sanitizedMarkdown)) {
-    res.status(400).json({
-      error: 'markdown must not be empty',
-      code: 'EMPTY_MARKDOWN',
-      fix: '{"markdown":"# Title\\n\\nHello"}',
-    });
-    return;
-  }
   if (marks !== undefined && !isMarksPayload(marks)) {
     res.status(400).json({ error: 'marks must be an object when provided', code: 'INVALID_MARKS' });
     return;
@@ -1326,10 +1318,6 @@ apiRoutes.put('/documents/:slug', async (req: Request, res: Response) => {
     return;
   }
   const sanitizedMarkdown = hasMarkdownUpdate ? stripEphemeralCollabSpans(markdown as string) : '';
-  if (hasMarkdownUpdate && isBlankMarkdown(sanitizedMarkdown)) {
-    res.status(400).json({ error: 'markdown must not be empty', code: 'EMPTY_MARKDOWN' });
-    return;
-  }
   if (hasMarksUpdate && !isMarksPayload(marks)) {
     res.status(400).json({ error: 'marks must be an object when provided' });
     return;

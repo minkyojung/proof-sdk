@@ -1063,12 +1063,11 @@ async function runRoutePayloadValidationTests(): Promise<void> {
       assert(typeof payload.fix === 'string' && payload.fix.includes('markdown'), 'Expected a fix snippet');
     });
 
-    await test('D2: POST /documents rejects empty markdown', async () => {
+    await test('D2: POST /documents accepts empty markdown', async () => {
       const response = await post(baseUrl, '/api/documents', { markdown: '   ' });
-      assert(response.status === 400, `Expected status 400, got ${response.status}`);
+      assert(response.status === 200, `Expected status 200, got ${response.status}`);
       const payload = await response.json();
-      assertEqual(payload.code, 'EMPTY_MARKDOWN');
-      assert(payload.error === 'markdown must not be empty', 'Expected empty markdown validation message');
+      assert(typeof payload.slug === 'string' && payload.slug.length > 0, 'Expected slug in payload');
     });
 
     await test('D2: POST /api/share/markdown missing markdown returns code + fix', async () => {
@@ -1089,15 +1088,24 @@ async function runRoutePayloadValidationTests(): Promise<void> {
       assert(payload.error === 'markdown must be a string when provided', 'Expected markdown validation message');
     });
 
-    await test('D2: PUT /documents/:slug rejects empty markdown payload', async () => {
-      const response = await put(baseUrl, `/api/documents/${slug}`, {
-        markdown: '   ',
-        ownerSecret,
+    await test('D2: PUT /documents/:slug accepts empty markdown payload', async () => {
+      // Self-contained doc so we don't clobber the shared `slug`'s
+      // content — later tests in this suite rely on its 'Hello' body.
+      const fresh = await post(baseUrl, '/api/documents', {
+        markdown: '# scratch',
+        title: 'scratch',
+        ownerId: 'tester',
       });
-      assert(response.status === 400, `Expected status 400, got ${response.status}`);
+      const freshPayload = await fresh.json();
+      const freshSlug = freshPayload.slug as string;
+      const freshOwnerSecret = freshPayload.ownerSecret as string;
+      const response = await put(baseUrl, `/api/documents/${freshSlug}`, {
+        markdown: '   ',
+        ownerSecret: freshOwnerSecret,
+      });
+      assert(response.status === 200, `Expected status 200, got ${response.status}`);
       const payload = await response.json();
-      assertEqual(payload.code, 'EMPTY_MARKDOWN');
-      assert(payload.error === 'markdown must not be empty', 'Expected empty markdown validation message');
+      assert(payload.success === true, 'Expected success: true for empty markdown');
     });
 
     await test('D2: PUT /documents/:slug rejects null marks payload', async () => {
