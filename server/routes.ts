@@ -199,10 +199,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isBlankMarkdown(markdown: string): boolean {
-  return !markdown.trim();
-}
-
 type CommentEventType = 'comment.added' | 'comment.replied' | 'comment.resolved';
 
 type CommentEventEmission = {
