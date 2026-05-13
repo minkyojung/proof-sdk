@@ -5947,6 +5947,31 @@ async function readPersistedDocStateAsync(
   }
 
   if (!snapshot && updates.length === 0 && row) {
+    // Brand-new docs registered by an offline-first client arrive with
+    // empty markdown and no ydoc state — they're a write-first surface,
+    // not a legacy projection that needs recovering from. Running the
+    // legacy reseed for them mints a fresh clientId baseline on every
+    // cold connect; if the client closes inside the 250ms persist
+    // debounce (likely on first-keypress workflows), the snapshot
+    // never gets written and the next connect reseeds again. Each
+    // reseed's clientId paragraph ends up in the merged fragment,
+    // producing a 1→2→4→8 doubling on the client after enough cycles.
+    // Skip the reseed entirely and hand back a baseline-less empty
+    // Y.Doc; the client's own state (IndexedDB + first onChange) is
+    // the source of truth from here on.
+    if (!row.markdown || row.markdown.length === 0) {
+      const ydoc = new Y.Doc();
+      const authoritativeBaseline = buildAuthoritativeBaseline(ydoc);
+      return {
+        ydoc,
+        updatedAt: row.updated_at ?? null,
+        yStateVersion: row.y_state_version ?? 0,
+        accessEpoch: typeof row.access_epoch === 'number' ? row.access_epoch : null,
+        authoritativeSnapshot: authoritativeBaseline.snapshot,
+        stateVector: authoritativeBaseline.stateVector,
+        degradedReason: null,
+      };
+    }
     const reseedGate = shouldBlockLegacyReseed(
       slug,
       typeof row.access_epoch === 'number' ? row.access_epoch : null,
