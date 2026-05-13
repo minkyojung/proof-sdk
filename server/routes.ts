@@ -136,6 +136,17 @@ function isMarksPayload(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+// Client-supplied slugs come from offline-first flows (writer-tauri creates
+// daily/wiki docs locally before the server has acknowledged anything).
+// Pattern matches generateSlug() output (8x lowercase alphanumeric) plus a
+// relaxed upper bound for future longer ID schemes (UUID-derived, etc.).
+// Rejecting anything ambiguous keeps the routing surface (/documents/:slug/…)
+// unambiguous and stops path-traversal-style inputs at the door.
+const CLIENT_SLUG_PATTERN = /^[a-z0-9]{4,64}$/;
+function isValidClientSlug(value: unknown): value is string {
+  return typeof value === 'string' && CLIENT_SLUG_PATTERN.test(value);
+}
+
 function trustProxyHeaders(): boolean {
   const value = (process.env.PROOF_TRUST_PROXY_HEADERS || '').trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
@@ -799,7 +810,7 @@ apiRoutes.post('/documents', (req: Request, res: Response) => {
     recordLegacyCreateRouteTelemetry(req, legacyCreateMode, 'allowed');
   }
 
-  const { markdown, marks, title, ownerId } = req.body;
+  const { markdown, marks, title, ownerId, slug: requestedSlug } = req.body;
 
   if (typeof markdown !== 'string') {
     res.status(400).json({
@@ -814,8 +825,44 @@ apiRoutes.post('/documents', (req: Request, res: Response) => {
     res.status(400).json({ error: 'marks must be an object when provided', code: 'INVALID_MARKS' });
     return;
   }
+  if (requestedSlug !== undefined && !isValidClientSlug(requestedSlug)) {
+    res.status(400).json({
+      error: 'slug must match [a-z0-9]{4,64} when provided',
+      code: 'INVALID_SLUG',
+    });
+    return;
+  }
 
-  const slug = generateSlug();
+  // Offline-first clients pick their own slug (client-side UUID-style) so
+  // they can create + edit a doc before the server is reachable, then call
+  // this endpoint fire-and-forget to register it. We keep the call idempotent
+  // by returning the existing doc unchanged on a slug collision rather than
+  // erroring — a retry of the same registration must not break the client.
+  if (isValidClientSlug(requestedSlug)) {
+    const existing = getDocumentBySlug(requestedSlug);
+    if (existing) {
+      const existingAccess = createDocumentAccessToken(requestedSlug, 'editor');
+      const existingLinks = buildShareLink(req, existing.slug);
+      res.json({
+        success: true,
+        slug: existing.slug,
+        docId: existing.doc_id,
+        url: existingLinks.url,
+        shareUrl: existingLinks.shareUrl,
+        viewUrl: existingLinks.shareUrl,
+        viewPath: existingLinks.url,
+        accessToken: existingAccess.secret,
+        accessRole: existingAccess.role,
+        active: existing.active === 1,
+        shareState: existing.share_state,
+        snapshotUrl: getSnapshotPublicUrl(existing.slug),
+        createdAt: existing.created_at,
+        alreadyExisted: true,
+      });
+      return;
+    }
+  }
+  const slug = isValidClientSlug(requestedSlug) ? requestedSlug : generateSlug();
   const ownerSecret = randomUUID();
   const normalizedMarks = canonicalizeStoredMarks(marks ?? {});
   const doc = createDocument(slug, sanitizedMarkdown, normalizedMarks, title, ownerId, ownerSecret);
